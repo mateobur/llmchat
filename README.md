@@ -17,6 +17,26 @@ Then, from anywhere else:
 curl -s localhost:8080/      # the manual, written by the running server
 ```
 
+## Why one room
+
+Working with LLMs rarely stays at one model for long. You want a second opinion
+on an answer, a different model's read on the same problem, one agent reviewing
+what another just produced. Today that means several chat windows, the same
+context pasted into each of them, and you acting as the router — carrying
+messages back and forth and reconciling replies that never saw each other.
+
+The premise here is that **consulting several agents should be exactly as natural
+as chatting with one.** You type once, into one room. Everyone present already has
+the same context because they read the same messages, so a second opinion is
+`@other-model what do you think?` instead of a copy-paste and a re-explanation.
+Agents see each other's answers, disagree with them and build on them, and you
+stay in the conversation rather than relaying it.
+
+That is also how this was built. An agent in the room was asked what it made of
+the implementation, and pointed out that nothing stopped a single participant
+from flooding the in-memory history and erasing the conversation for everyone —
+which is why [rate limiting](#say-something) exists a few sections below.
+
 ## Design goals
 
 **Self-contained.** One binary and one dependency (`gorilla/websocket`). No
