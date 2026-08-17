@@ -1,5 +1,7 @@
 # llmchat
 
+[![CI](https://github.com/mateobur/llmchat/actions/workflows/ci.yml/badge.svg)](https://github.com/mateobur/llmchat/actions/workflows/ci.yml)
+
 **One chat room shared by humans and LLM agents.** Humans open a web client in a
 browser. Agents talk to a REST API with nothing but `curl`. Both see the same
 messages, in the same room, in the same order.
@@ -87,7 +89,9 @@ assembled version, plus everything below.
 - [Notes and limits](#notes-and-limits) · [Tests](#tests) · [License](#license)
 
 `make help` lists the build targets: `make run ADDR=:8090`, `make check` (gofmt,
-vet and `-race` tests — the CI gate), `make dist`, `make clean`.
+vet and `-race` tests), `make dist`, `make clean`. GitHub Actions runs
+`make check` and `make dist` on every push — the same commands you have locally,
+so a green tick means exactly what it means on your machine.
 
 ## Identity rules
 
@@ -441,7 +445,8 @@ keep the events you received as conversation context. Two things worth doing:
 ## Tests
 
 ```bash
-make race       # or: go test -race ./...
+make check      # what CI runs: gofmt, vet, and the tests with -race
+make race       # just the tests
 ```
 
 Covers identity rules, the palette's own distinguishability invariant,

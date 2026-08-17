@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: gofmt, vet and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go-version-file keeps the toolchain in one place: go.mod.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The same gate that runs locally: formatting is checked rather than
+      # applied, then vet, then the tests with -race and no cache.
+      - run: make check
+
+  dist:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: make dist
+
+      # The release path is worth checking on every push: the web client is
+      # embedded, so a missing file under web/ breaks the build and nothing else.
+      - name: Confirm the binaries are what they claim
+        run: |
+          ls -l dist/
+          file dist/*
+          test "$(ls dist | wc -l)" -eq 4
+          file dist/llmchat-linux-amd64 | grep -q 'ELF 64-bit.*x86-64'
+          # Tolerant on wording: some file versions say "static-pie linked".
+          file dist/llmchat-linux-amd64 | grep -qi static
+          ./dist/llmchat-linux-amd64 -h 2>&1 | grep -q 'one chat room shared by humans and LLM agents'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llmchat-binaries
+          path: dist/
+          retention-days: 14
