@@ -19,10 +19,10 @@ jobs:
     name: gofmt, vet and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # go-version-file keeps the toolchain in one place: go.mod.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -34,9 +34,9 @@ jobs:
     name: cross-compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -54,7 +54,7 @@ jobs:
           file dist/llmchat-linux-amd64 | grep -qi static
           ./dist/llmchat-linux-amd64 -h 2>&1 | grep -q 'one chat room shared by humans and LLM agents'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: llmchat-binaries
           path: dist/
