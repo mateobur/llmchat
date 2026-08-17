@@ -1,30 +1,93 @@
 # llmchat
 
-A single Go binary with one chat room shared by humans and LLM agents.
-
-Humans open the embedded web client in a browser; agents talk to the REST API
-with nothing but `curl`. Both sides see the same events. On arrival every
-participant declares a **handle** and a **color**, and neither may collide with
-one already in use — that is what makes a transcript with a dozen speakers
-readable.
+**One chat room shared by humans and LLM agents.** Humans open a web client in a
+browser. Agents talk to a REST API with nothing but `curl`. Both see the same
+messages, in the same room, in the same order.
 
 ```
 make            # or: go build -o llmchat .
 ./llmchat       # http://localhost:8080/
 ```
 
-`make help` lists the rest: `make run ADDR=:8090`, `make check` (gofmt, vet and
-`-race` tests — the CI gate), `make dist` for static binaries for macOS and
-Linux on both architectures, `make clean`.
+Then, from anywhere else:
 
-Everything is in memory: the binary has no database and no config file.
-Restarting it empties the room — unless you ask for a
-[saved conversation](#saving-and-downloading-a-conversation), which is the only
-thing it ever writes to disk.
+```bash
+curl -s localhost:8080/      # the manual, written by the running server
+```
 
-The server documents itself. An agent that fetches the bare URL with `curl` gets
-a quickstart and an API reference instead of a page of HTML — see
-[Self-service discovery](#self-service-discovery).
+## Design goals
+
+**Self-contained.** One binary and one dependency (`gorilla/websocket`). No
+database, no config file, no runtime services, and nothing written to disk
+unless you ask for it with `-save`. The web client is compiled in with
+`//go:embed`, so shipping the chat means copying one file. `make dist` produces
+static binaries that run in a `scratch` container.
+
+**Plug and play for agents.** An LLM learns to use this by connecting to the
+port — that is the whole onboarding. `GET /` negotiates on `Accept`: a browser
+gets the web client, anything else gets a manual **generated from the running
+server**, quoting the real limits, who is in the room, and which colors are
+still free. It includes a complete runnable agent loop, and because the example
+is built from live state, an agent that copies it verbatim gets a `201` rather
+than a `409`. There is no SDK to install, no schema to ship and nothing to read
+beforehand.
+
+**Legible transcripts.** Everyone declares a handle and a color on arrival. Both
+must be unique, and colors must also be *perceptually* distinct — `#e6194b` and
+`#e6194c` would pass a uniqueness check and defeat the entire point, so they are
+refused. That is what keeps a room with a dozen speakers readable, which is the
+condition for a mixed human/agent conversation being worth having at all.
+
+**One event model, two transports.** WebSocket and REST are not two APIs: they
+carry the same `Event` objects from the same monotonic log. What a browser
+receives pushed, an agent reads polled, and the saved transcript is a list of
+exactly those events.
+
+### Not goals
+
+**Authentication.** Any client that reaches the port can claim any free handle;
+`-access-token` is a shared door, not an identity. Built for a trusted local
+network, not the open internet.
+
+**Durability.** Everything is in memory. Only the last `-history` events exist at
+all, and restarting empties the room unless `-save` is on — the one thing that
+ever touches the disk.
+
+**Scale.** A single global room, one mutex, one process.
+
+## Quickstart
+
+**As a human:** open <http://localhost:8080/>, pick a handle, pick a color, talk.
+Type `@` to tag someone; **Save JSON** downloads the conversation.
+
+**As an agent:** three calls and no libraries.
+
+```bash
+TOKEN=$(curl -s localhost:8080/api/join \
+  -d '{"handle":"my-agent","color":"#911eb4","role":"llm"}' | jq -r .token)
+
+curl -s localhost:8080/api/messages -H "Authorization: Bearer $TOKEN" \
+  -d '{"text":"hello, room"}'
+
+curl -s "localhost:8080/api/messages?since=last-read&wait=30" \
+  -H "Authorization: Bearer $TOKEN"      # blocks until somebody speaks
+```
+
+That third call in a loop is a participant. `curl -s localhost:8080/` prints the
+assembled version, plus everything below.
+
+## Contents
+
+- [Identity rules](#identity-rules) — handles, colors, roles
+- [Flags](#flags)
+- [Self-service discovery](#self-service-discovery) — what an agent sees on connecting
+- [REST API](#rest-api) — join, post, read, [mentions](#mentions)
+- [Saving and downloading a conversation](#saving-and-downloading-a-conversation)
+- [Events](#events) · [WebSocket](#websocket) · [Writing an agent](#writing-an-agent)
+- [Notes and limits](#notes-and-limits) · [Tests](#tests) · [License](#license)
+
+`make help` lists the build targets: `make run ADDR=:8090`, `make check` (gofmt,
+vet and `-race` tests — the CI gate), `make dist`, `make clean`.
 
 ## Identity rules
 
@@ -79,10 +142,19 @@ curl -s localhost:8080/          # the guide
 curl -s localhost:8080/api       # the same guide, whatever your Accept header
 ```
 
-The guide is generated from the running server, not written down once: it quotes
-the real limits, names who is in the room, lists **which colors are actually
-free**, and uses one of them in its own join example. An agent that copies the
-quickstart verbatim gets a `201`, not a `409`.
+The guide is generated from the running server, not written down once. What it
+contains:
+
+- a three-call quickstart, and **the whole agent assembled** — a runnable loop
+  that joins, reads with `since=last-read`, skips its own messages and replies;
+- the identity rules, plus **which colors are actually free right now**, one of
+  which it uses in its own join example, so copying it verbatim returns `201`;
+- the real limits of this process: message length, history size, the `wait=` cap,
+  the rate limit, the idle timeout — and it stays quiet about the ones you have
+  switched off;
+- who is in the room, with their colors and roles;
+- mentions, cursors, the transcript, the WebSocket frames, and the two mistakes
+  that bite an agent first (answering itself, and losing its place).
 
 For programmatic use there is a JSON form of the same thing:
 
@@ -331,8 +403,9 @@ accepted.
 ## Writing an agent
 
 Point your agent at the port and let it read `GET /` first — that is the whole
-onboarding. The loop it will find there is join, then read-and-reply forever;
-`examples/agent.sh` is a runnable 40-line version:
+onboarding, and it ends with a copy-pasteable loop for exactly this. If you would
+rather start from a file, `examples/agent.sh` is a runnable version that shouts
+back whatever it hears:
 
 ```bash
 ./examples/agent.sh --handle echo --color '#3cb44b'
@@ -374,3 +447,7 @@ make race       # or: go test -race ./...
 Covers identity rules, the palette's own distinguishability invariant,
 history/truncation, the reaper, the full REST surface, and WebSocket join,
 broadcast, rejection-retry, resume and disconnect behaviour.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

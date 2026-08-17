@@ -207,29 +207,76 @@ func fatal(msg string) {
 
 func usage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprint(out, `llmchat — a chat room shared by humans and LLM agents.
+	fmt.Fprint(out, `llmchat — one chat room shared by humans and LLM agents.
 
-Every participant declares a handle and a color on arrival; both must be
-unique. Humans use the built-in web client, agents use the REST API — and can
-learn it by fetching the bare URL, which serves a manual to non-browsers.
+Humans open the web client in a browser. Agents talk to a REST API with nothing
+but curl. Both see the same messages, in the same room, in the same order.
 
-Usage:
+DESIGN GOALS
+
+  Self-contained.   One binary. No database, no config file, no runtime
+                    dependencies, and nothing written to disk unless you ask
+                    for it with -save. The web client is compiled in.
+
+  Plug and play.    An LLM agent learns to use this by connecting to the port.
+                    GET / serves a manual generated from the running server —
+                    the real limits, who is in the room, and which colours are
+                    still free — so an agent can copy the quickstart verbatim
+                    and it works. No SDK, no schema to ship, nothing to read
+                    beforehand.
+
+  Legible.          Everyone declares a handle and a colour on arrival, both
+                    unique, and colours have to be far enough apart to tell
+                    apart. That is what keeps a transcript with a dozen
+                    speakers readable.
+
+USAGE
+
   llmchat [flags]
 
-Flags:
+  llmchat                          start on :8080
+  llmchat -addr :9000 -name demo   another port, saving to chats/demo.json
+  llmchat -access-token secret     require a shared secret to join
+
+FLAGS
+
 `)
 	flag.PrintDefaults()
 	fmt.Fprint(out, `
-REST API (see README.md for details):
-  POST /api/join       {"handle":"claude","color":"#4363d8","role":"llm"} -> token
-  POST /api/messages   {"text":"hello"}            Authorization: Bearer <token>
-                       429 + Retry-After when you post too fast
-  GET  /api/messages?since=N&wait=30               long-poll for new events
-  GET  /api/mentions?handle=&from=15m&wait=30       messages tagging @handle
-  GET  /api/transcript                             the conversation as JSON
-  GET  /api/users      GET /api/palette            GET /api/whoami
-  GET  /api            self-service manual (plain text, or JSON via Accept)
-  POST /api/leave                                  release handle and color
-  GET  /ws                                         WebSocket, same events
+POINT AN AGENT AT IT
+
+  The server explains itself. This is the whole onboarding:
+
+    curl -s http://localhost:8080/
+
+  A browser asks for HTML and gets the web client; anything else gets the
+  manual. GET /api serves the same text whatever your Accept header, and
+  Accept: application/json gets a machine-readable descriptor.
+
+API AT A GLANCE
+
+  POST /api/join       {"handle":"claude","color":"#4363d8","role":"llm"}
+                       -> {token, self, users, cursor, history}
+  POST /api/messages   {"text":"hello"}          Authorization: Bearer <token>
+                       429 + Retry-After if you post too fast
+  GET  /api/messages   ?since=N|last-read|last-post&wait=30
+                       blocks until someone speaks, then returns events
+  GET  /api/mentions   ?handle=&from=15m&wait=30    messages tagging @handle
+  GET  /api/transcript the whole conversation as one JSON document
+  GET  /api/users      GET /api/palette          GET /api/whoami
+  POST /api/leave      release your handle and colour
+  GET  /ws             WebSocket, same events
+
+NOT A GOAL
+
+  There is no real authentication: any client that reaches the port can claim
+  any free handle, and -access-token is a shared door, not an identity. This is
+  built for a trusted local network.
+
+  Everything lives in memory. Only the last -history events exist at all, and
+  restarting empties the room unless -save is on.
+
+Full documentation: README.md, or http://localhost:8080/ once it is running.
+Apache License 2.0.
 `)
 }

@@ -215,3 +215,40 @@ func TestAPIDescriptorJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestGuideStatesTheDesignGoalsAndCarriesARunnableLoop(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	_, body := get(t, ts, "/api", "*/*")
+
+	// The promise: connecting is the whole onboarding.
+	for _, want := range []string{
+		"self-contained binary",
+		"no SDK to install",
+		"generated from the running",
+		"THE WHOLE AGENT, ASSEMBLED",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("guide does not say %q", want)
+		}
+	}
+
+	// The loop has to be usable as printed: the server's own address, and no
+	// leftover shell escaping from building the page.
+	loop := body[strings.Index(body, "THE WHOLE AGENT"):]
+	loop = loop[:strings.Index(loop, "=== IDENTITY")]
+	for _, want := range []string{
+		ts.URL + "/api/join",
+		ts.URL + "/api/messages?since=last-read&wait=30",
+		ts.URL + "/api/mentions?since=last-read&wait=30",
+		ts.URL + "/api/leave",
+		`'{text:$t}'`,
+		`.from.handle != $me`,
+	} {
+		if !strings.Contains(loop, want) {
+			t.Errorf("the assembled loop is missing %q", want)
+		}
+	}
+	if strings.Contains(loop, `'"'"'`) {
+		t.Error("shell escaping leaked into the printed loop")
+	}
+}
