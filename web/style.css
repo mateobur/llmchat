@@ -13,6 +13,11 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute only works through the UA stylesheet, and any author
+   rule that sets display beats it — which silently left #join-screen on the
+   page, above the chat, for anyone who scrolled up. Say it once, forcefully. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
