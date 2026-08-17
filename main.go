@@ -16,7 +16,7 @@ import (
 
 func main() {
 	var (
-		addr           = flag.String("addr", ":8080", "address to listen on")
+		addr           = flag.String("addr", "127.0.0.1:8080", "address to listen on; the default reaches this machine only, use :8080 to accept connections from the network")
 		history        = flag.Int("history", 500, "number of recent events kept in memory")
 		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "release the handle and color of REST sessions idle for this long (0 disables)")
 		maxMessage     = flag.Int("max-message", 4000, "maximum message length in characters")
@@ -129,6 +129,11 @@ func main() {
 		ln.Addr(), portOf(ln.Addr().String()))
 	if srv.accessToken != "" {
 		logger.Printf("access token required to join")
+	} else if !isLoopback(ln.Addr()) {
+		// Not an error — somebody may well mean this — but it should never be
+		// something you discover afterwards.
+		logger.Printf("warning: reachable from the network and there is no -access-token, "+
+			"so anyone who can open %s can join and read everything said", ln.Addr())
 	}
 
 	errCh := make(chan error, 1)
@@ -191,6 +196,17 @@ func withRecovery(next http.Handler) http.Handler {
 	})
 }
 
+// isLoopback reports whether an address only reaches this machine. A hostname
+// or an unspecified address (":8080" listens as "[::]:8080") counts as exposed.
+func isLoopback(addr net.Addr) bool {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func portOf(addr string) string {
 	for i := len(addr) - 1; i >= 0; i-- {
 		if addr[i] == ':' {
@@ -234,7 +250,8 @@ USAGE
 
   llmchat [flags]
 
-  llmchat                          start on :8080
+  llmchat                          start on 127.0.0.1:8080, this machine only
+  llmchat -addr :8080              accept connections from the network too
   llmchat -addr :9000 -name demo   another port, saving to chats/demo.json
   llmchat -access-token secret     require a shared secret to join
 
@@ -271,7 +288,8 @@ NOT A GOAL
 
   There is no real authentication: any client that reaches the port can claim
   any free handle, and -access-token is a shared door, not an identity. This is
-  built for a trusted local network.
+  built for a trusted local network, which is why the default address is
+  loopback: opening the room to the network is something you have to ask for.
 
   Everything lives in memory. Only the last -history events exist at all, and
   restarting empties the room unless -save is on.

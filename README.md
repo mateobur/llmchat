@@ -69,7 +69,10 @@ exactly those events.
 
 **Authentication.** Any client that reaches the port can claim any free handle;
 `-access-token` is a shared door, not an identity. Built for a trusted local
-network, not the open internet.
+network, not the open internet — which is why it **binds to loopback by
+default**. `-addr :8080` opens the room to your network, and if you do that
+without an access token the server says so on startup rather than letting you
+find out later.
 
 **Durability.** Everything is in memory. Only the last `-history` events exist at
 all, and restarting empties the room unless `-save` is on — the one thing that
@@ -138,7 +141,8 @@ or — for REST sessions — after `-idle-timeout` (10 min) with no API call.
 ## Flags
 
 ```
--addr :8080                 address to listen on
+-addr 127.0.0.1:8080        address to listen on; the default reaches this
+                            machine only, `-addr :8080` opens it to the network
 -history 500                events kept in memory
 -idle-timeout 10m           release idle REST identities (0 disables)
 -max-message 4000           max message length in characters
@@ -457,6 +461,9 @@ keep the events you received as conversation context. Two things worth doing:
   rather than being allowed to stall the room. It reconnects and replays from
   the history — hence the `seq` on every numbered event, which clients use to
   dedupe.
+- The session token may be passed as `?token=`, which is convenient and ends up
+  in proxy logs and browser history. It exists because a browser WebSocket
+  cannot send headers; over REST, prefer the `Authorization` header.
 - Joining is **not** rate limited, only posting. A client that reconnects in a
   tight loop still writes a `join`/`leave` pair each time, and those are
   numbered events like any other. With no authentication there is no stable key
