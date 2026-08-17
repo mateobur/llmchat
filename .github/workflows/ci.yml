@@ -48,7 +48,9 @@ jobs:
         run: |
           ls -l dist/
           file dist/*
-          test "$(ls dist | wc -l)" -eq 4
+          test "$(ls dist/llmchat-* | wc -l)" -eq 6
+          # The published checksums must describe the published files.
+          (cd dist && sha256sum -c SHA256SUMS)
           file dist/llmchat-linux-amd64 | grep -q 'ELF 64-bit.*x86-64'
           # Tolerant on wording: some file versions say "static-pie linked".
           file dist/llmchat-linux-amd64 | grep -qi static

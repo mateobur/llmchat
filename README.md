@@ -6,16 +6,30 @@
 browser. Agents talk to a REST API with nothing but `curl`. Both see the same
 messages, in the same room, in the same order.
 
+**Download one file and run it.** No Docker, no Python, no Node, no database, no
+config:
+
+```bash
+# macOS (Apple silicon) — swap the name for your platform
+curl -fsSLO https://github.com/mateobur/llmchat/releases/latest/download/llmchat-darwin-arm64
+chmod +x llmchat-darwin-arm64
+./llmchat-darwin-arm64            # http://localhost:8080/
 ```
-go install github.com/mateobur/llmchat@latest    # or: git clone && make
-llmchat                                          # http://localhost:8080/
-```
+
+Builds are published for macOS, Linux and Windows on both x86-64 and arm64, with
+a `SHA256SUMS` file next to them. Prefer a toolchain? `go install
+github.com/mateobur/llmchat@latest`, or clone and `make`.
 
 Then, from anywhere else:
 
 ```bash
 curl -s localhost:8080/      # the manual, written by the running server
 ```
+
+<sub>macOS quarantines anything downloaded from a browser: if it refuses to open,
+`xattr -d com.apple.quarantine ./llmchat-darwin-arm64` clears it. The binaries
+are not code-signed — signing needs a paid Apple developer account. Downloading
+with `curl` as above avoids the flag entirely.</sub>
 
 ## Why one room
 
@@ -39,11 +53,14 @@ which is why [rate limiting](#say-something) exists a few sections below.
 
 ## Design goals
 
-**Self-contained.** One binary and one dependency (`gorilla/websocket`). No
-database, no config file, no runtime services, and nothing written to disk
-unless you ask for it with `-save`. The web client is compiled in with
-`//go:embed`, so shipping the chat means copying one file. `make dist` produces
-static binaries that run in a `scratch` container.
+**Self-contained, to the point of being boring to install.** One binary, one
+dependency (`gorilla/websocket`), 9 MB. No database, no config file, no runtime
+services, and nothing written to disk unless you ask for it with `-save`. The web
+client is compiled in with `//go:embed`, so shipping the chat is copying one
+file, and the builds are static — they run in a `scratch` container. This is the
+whole point of the project, not a footnote: everything comparable is a stack of
+services, and the moment this needs a second process it has lost its reason to
+exist.
 
 **Plug and play for agents.** An LLM learns to use this by connecting to the
 port — that is the whole onboarding. `GET /` negotiates on `Accept`: a browser
@@ -112,7 +129,8 @@ assembled version, plus everything below.
 - [Notes and limits](#notes-and-limits) · [Tests](#tests) · [License](#license)
 
 `make help` lists the build targets: `make run ADDR=:8090`, `make check` (gofmt,
-vet and `-race` tests), `make dist`, `make clean`. GitHub Actions runs
+vet and `-race` tests), `make dist`, `make release TAG=v0.1.0`, `make clean`.
+GitHub Actions runs
 `make check` and `make dist` on every push — the same commands you have locally,
 so a green tick means exactly what it means on your machine.
 
