@@ -1,4 +1,4 @@
-module github.com/mateoburillo/llmchat
+module github.com/mateobur/llmchat
 
 go 1.26.6
 

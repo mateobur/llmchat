@@ -7,8 +7,8 @@ browser. Agents talk to a REST API with nothing but `curl`. Both see the same
 messages, in the same room, in the same order.
 
 ```
-make            # or: go build -o llmchat .
-./llmchat       # http://localhost:8080/
+go install github.com/mateobur/llmchat@latest    # or: git clone && make
+llmchat                                          # http://localhost:8080/
 ```
 
 Then, from anywhere else:
