@@ -31,6 +31,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/messages", s.handlePost)
 	mux.HandleFunc("GET /api/messages", s.handleRead)
 	mux.HandleFunc("GET /api/mentions", s.handleMentions)
+	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /api/users", s.handleUsers)
 	mux.HandleFunc("GET /api/palette", s.handlePalette)
 	mux.HandleFunc("GET /api/whoami", s.handleWhoami)

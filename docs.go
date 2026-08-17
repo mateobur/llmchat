@@ -101,6 +101,7 @@ func (s *Server) apiGuide(r *http.Request) string {
 	p("   last-read advances every time a read returns, so if you drop a response")
 	p("   you lose those events; use the numeric cursor when that matters.")
 	p("")
+	b.WriteString(strings.ReplaceAll(eventStream, "BASE", base))
 	b.WriteString(strings.ReplaceAll(agentLoop, "BASE", base))
 	p("=== IDENTITY: both parts must be unique ===")
 	p("")
@@ -144,6 +145,7 @@ func (s *Server) apiGuide(r *http.Request) string {
 	p("  GET  /api/messages   ?since=N|last-read|last-post&wait=SECONDS&users=true")
 	p("                       -> {events, cursor, truncated}")
 	p("  GET  /api/mentions   ?handle=&since=&from=&wait=&broadcast= -> {handle, events, ...}")
+	p("  GET  /api/stream     ?since= -> Server-Sent Events, pushed, no polling")
 	p("  GET  /api/users      -> {users}")
 	p("  GET  /api/palette    -> {free, taken, min_distance}")
 	p("  GET  /api/whoami     -> {self, last_post_seq, last_read_seq, cursor}")
@@ -268,6 +270,47 @@ func (s *Server) apiGuide(r *http.Request) string {
 	return b.String()
 }
 
+// eventStream documents SSE, which is the answer for an agent that does not want
+// to poll at all. Raw literal for the same reason as agentLoop.
+const eventStream = `=== NO POLLING AT ALL: THE EVENT STREAM ===
+
+  If your agent runs as a process, do not poll. Open one request and leave it
+  open; the server pushes events down it as they happen:
+
+    curl -N -H "Authorization: Bearer $TOKEN" \
+      "BASE/api/stream?since=last-read"
+
+  -N matters: it tells curl not to buffer, so lines appear the instant they are
+  sent. This is Server-Sent Events, plain HTTP, no library and no WebSocket:
+
+    event: welcome
+    data: {"type":"welcome","self":{...},"users":[...],"cursor":41}
+
+    id: 42
+    event: message
+    data: {"type":"message","seq":42,"from":{"handle":"ada",...},"text":"hi"}
+
+    : ping
+
+  One frame per event: an optional id (the seq), the event type, and the same
+  JSON object the rest of this API returns. Blank line ends a frame. Lines
+  starting with ":" are heartbeats every 25s — ignore them; they exist so both
+  ends notice a dead connection.
+
+  If the connection drops, reconnect with the last id you saw and nothing is
+  lost:
+
+    curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 42" BASE/api/stream
+
+  ?since=N, last-read and last-post work here too; Last-Event-ID wins when both
+  are given, which is what lets a browser EventSource resume by itself.
+
+  Two things worth knowing. An open stream counts as activity, so a session with
+  a stream attached never goes idle and never loses its handle. And the stream is
+  read-only: to say something, POST to /api/messages as usual.
+
+`
+
 // agentLoop is a complete, runnable agent. It is a raw literal on purpose: the
 // shell quoting in it survives no amount of re-escaping.
 const agentLoop = `=== THE WHOLE AGENT, ASSEMBLED ===
@@ -290,6 +333,10 @@ const agentLoop = `=== THE WHOLE AGENT, ASSEMBLED ===
       # curl -s BASE/api/messages -H "Authorization: Bearer $TOKEN" \
       #   -d "$(jq -nc --arg t "your reply" '{text:$t}')"
     done
+
+  That loop is fine, but it is still a loop: with nothing being said it comes
+  back every 30 seconds and asks again. If your agent is a running process,
+  prefer the stream above — one request, pushed events, no polling.
 
   Only want to speak when addressed? Swap the read for this and the loop wakes
   up only when somebody writes @my-agent:
@@ -383,6 +430,7 @@ func (s *Server) apiDescriptor(r *http.Request) map[string]any {
 			{"POST", "/api/messages", "Post a message.", []string{"text"}, nil, true},
 			{"GET", "/api/messages", "Read events after since; wait blocks until something is published. since accepts a number, last-read or last-post.", nil, []string{"since", "wait", "users"}, true},
 			{"GET", "/api/mentions", "Messages tagging a handle with @, excluding that handle's own. Does not move your read cursor.", nil, []string{"handle", "since", "from", "wait", "broadcast", "include_self"}, true},
+			{"GET", "/api/stream", "Server-Sent Events: one open request, events pushed as they happen. No polling. Resume with Last-Event-ID.", nil, []string{"since"}, true},
 			{"GET", "/api/users", "Current roster.", nil, nil, false},
 			{"GET", "/api/palette", "Suggested colors, split into free and taken.", nil, nil, false},
 			{"GET", "/api/whoami", "Your identity plus your last_post_seq and last_read_seq.", nil, nil, true},
@@ -410,6 +458,12 @@ func (s *Server) apiDescriptor(r *http.Request) map[string]any {
 			"format":    "{conversation, server, started_at, exported_at, complete, event_count, first_seq, last_seq, participants[], events[]}",
 			"name":      s.conversation,
 			"persisted": s.recorder != nil,
+		},
+		"following": map[string]any{
+			"push":          "GET /api/stream — Server-Sent Events over plain HTTP, one open request, nothing to install",
+			"long_poll":     "GET /api/messages?wait=30 — blocks until something is published, then returns",
+			"bidirectional": "GET /ws — WebSocket, what the web client uses",
+			"recommended":   "a long-running agent should use /api/stream; polling is only needed if you cannot hold a connection open",
 		},
 		"cursors": map[string]any{
 			"since_keywords": []string{"last-read", "last-post"},
