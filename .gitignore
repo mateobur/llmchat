@@ -1,0 +1,6 @@
+# Build output
+/llmchat
+/dist/
+
+# Saved conversations (-save writes here)
+/chats/
