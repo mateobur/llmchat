@@ -287,9 +287,9 @@ a { color: var(--accent); }
 
 .msg.mine .text { color: #fff; }
 
-/* A row that tags you gets a rail on the left; the mention of your own name is
-   highlighted wherever it appears. */
-.msg.tagged { box-shadow: inset 2px 0 0 var(--accent); }
+/* A message that names you is set bold: it reads as "this one is for me" while
+   scrolling, without needing to be explained. */
+.msg.tagged .text { font-weight: 600; color: var(--text); }
 
 .mention { font-weight: 600; }
 
