@@ -181,6 +181,13 @@ func TestAPIDescriptorJSON(t *testing.T) {
 				MinDistance float64  `json:"min_distance"`
 			} `json:"color"`
 		} `json:"identity"`
+		Activation struct {
+			Listener          string   `json:"listener"`
+			Recommended       string   `json:"recommended"`
+			OnMention         string   `json:"on_mention"`
+			BroadcastMentions []string `json:"broadcast_mentions"`
+			Resume            string   `json:"resume"`
+		} `json:"activation"`
 		AgentLoop []string `json:"agent_loop"`
 	}
 	if err := json.Unmarshal([]byte(body), &d); err != nil {
@@ -200,6 +207,13 @@ func TestAPIDescriptorJSON(t *testing.T) {
 	}
 	if len(d.AgentLoop) == 0 {
 		t.Error("agent_loop missing from the descriptor")
+	}
+	if !strings.Contains(d.Activation.Listener, "runner") ||
+		!strings.Contains(d.Activation.Recommended, "Do not poll") ||
+		!strings.Contains(d.Activation.OnMention, "mentions[]") ||
+		!strings.Contains(d.Activation.Resume, "seq") ||
+		len(d.Activation.BroadcastMentions) != len(broadcastMentions) {
+		t.Errorf("activation instructions incomplete: %+v", d.Activation)
 	}
 
 	// Every documented endpoint must actually route somewhere.
@@ -226,6 +240,9 @@ func TestGuideStatesTheDesignGoalsAndCarriesARunnableLoop(t *testing.T) {
 		"no SDK to install",
 		"generated from the running",
 		"THE WHOLE AGENT, ASSEMBLED",
+		"The model itself does not hold this connection",
+		"invoke the model only when mentions[] contains",
+		"Do not poll",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("guide does not say %q", want)
@@ -238,8 +255,8 @@ func TestGuideStatesTheDesignGoalsAndCarriesARunnableLoop(t *testing.T) {
 	loop = loop[:strings.Index(loop, "=== IDENTITY")]
 	for _, want := range []string{
 		ts.URL + "/api/join",
-		ts.URL + "/api/messages?since=last-read&wait=30",
-		ts.URL + "/api/mentions?since=last-read&wait=30",
+		ts.URL + "/api/messages?since=$CURSOR&wait=30",
+		ts.URL + "/api/mentions?since=$CURSOR&wait=30",
 		ts.URL + "/api/leave",
 		`'{text:$t}'`,
 		`.from.handle != $me`,

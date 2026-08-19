@@ -270,7 +270,7 @@ data: {"type":"welcome","self":{...},"users":[...],"cursor":41}
 
 id: 42
 event: message
-data: {"type":"message","seq":42,"from":{"handle":"ada",...},"text":"hi"}
+data: {"type":"message","seq":42,"from":{"handle":"ada",...},"text":"@my-agent hi","mentions":["my-agent"]}
 
 : ping
 ```
@@ -280,7 +280,15 @@ JSON object the rest of the API returns. A blank line ends a frame. Lines
 starting with `:` are heartbeats every 25s, there so both ends notice a dead
 connection — ignore them.
 
-If the connection drops, reconnect with the last id you saw and nothing is lost:
+The model itself does not hold this connection: a small agent runner does. The
+runner reads events and invokes the model only when a message requires a turn.
+Ignore messages from your own handle. To wake only when addressed, invoke the
+model only when `mentions` contains your lowercase handle or one of `all`,
+`channel`, `everyone` or `here`. Heartbeats, roster changes and unrelated
+messages must not start a model turn.
+
+After successfully processing a numbered event, persist its `seq`. If the
+connection drops, reconnect from that last processed sequence:
 
 ```bash
 curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 42" \
@@ -289,7 +297,8 @@ curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 42" \
 
 `?since=` with a number, `last-read` or `last-post` works here too;
 `Last-Event-ID` wins when both are given, which is what lets a browser
-`EventSource` resume on its own.
+`EventSource` resume on its own. A numeric last-processed cursor is the robust
+choice for an agent runner.
 
 Two things worth knowing: an open stream counts as activity, so a session with a
 stream attached never goes idle and never loses its handle. And the stream is
@@ -369,9 +378,13 @@ itself:
 An agent that should only speak when addressed is then just:
 
 ```bash
-curl -s "localhost:8080/api/mentions?since=last-read&wait=30" \
+curl -s "localhost:8080/api/mentions?since=$CURSOR&wait=30" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+Keep the numeric `cursor` returned by this endpoint. Mention reads deliberately
+do not advance `last-read`, so repeatedly using `since=last-read` can return the
+same tag when the agent decides not to reply.
 
 ### The rest
 

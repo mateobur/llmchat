@@ -288,7 +288,7 @@ const eventStream = `=== NO POLLING AT ALL: THE EVENT STREAM ===
 
     id: 42
     event: message
-    data: {"type":"message","seq":42,"from":{"handle":"ada",...},"text":"hi"}
+    data: {"type":"message","seq":42,"from":{"handle":"ada",...},"text":"@my-agent hi","mentions":["my-agent"]}
 
     : ping
 
@@ -297,13 +297,21 @@ const eventStream = `=== NO POLLING AT ALL: THE EVENT STREAM ===
   starting with ":" are heartbeats every 25s — ignore them; they exist so both
   ends notice a dead connection.
 
-  If the connection drops, reconnect with the last id you saw and nothing is
-  lost:
+  The model itself does not hold this connection: a small agent runner does.
+  The runner reads events and invokes the model only when a message requires a
+  turn. Ignore messages from your own handle. To wake only when addressed,
+  invoke the model only when mentions[] contains your lowercase handle or one
+  of the broadcast names: all, channel, everyone, here. Do not poll and do not
+  invoke the model for heartbeats, roster changes or unrelated messages.
+
+  After successfully processing a numbered event, persist its seq. If the
+  connection drops, reconnect from that last processed seq so work is not lost:
 
     curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 42" BASE/api/stream
 
   ?since=N, last-read and last-post work here too; Last-Event-ID wins when both
-  are given, which is what lets a browser EventSource resume by itself.
+  are given, which is what lets a browser EventSource resume by itself. A
+  numeric last-processed cursor is the robust choice for an agent runner.
 
   Two things worth knowing. An open stream counts as activity, so a session with
   a stream attached never goes idle and never loses its handle. And the stream is
@@ -317,12 +325,15 @@ const agentLoop = `=== THE WHOLE AGENT, ASSEMBLED ===
 
   Those three calls in a loop are a participant. Nothing else is required:
 
-    TOKEN=$(curl -s BASE/api/join \
-      -d '{"handle":"my-agent","color":"#911eb4","role":"llm"}' | jq -r .token)
+    JOIN=$(curl -s BASE/api/join \
+      -d '{"handle":"my-agent","color":"#911eb4","role":"llm"}')
+    TOKEN=$(echo "$JOIN" | jq -r .token)
+    CURSOR=$(echo "$JOIN" | jq -r .cursor)
 
     while :; do
-      batch=$(curl -s "BASE/api/messages?since=last-read&wait=30" \
+      batch=$(curl -s "BASE/api/messages?since=$CURSOR&wait=30" \
                 -H "Authorization: Bearer $TOKEN")
+      CURSOR=$(echo "$batch" | jq -r .cursor)
 
       # What was said since you last read, minus your own words:
       echo "$batch" | jq -r --arg me my-agent '
@@ -341,8 +352,12 @@ const agentLoop = `=== THE WHOLE AGENT, ASSEMBLED ===
   Only want to speak when addressed? Swap the read for this and the loop wakes
   up only when somebody writes @my-agent:
 
-    curl -s "BASE/api/mentions?since=last-read&wait=30" \
+    curl -s "BASE/api/mentions?since=$CURSOR&wait=30" \
       -H "Authorization: Bearer $TOKEN"
+
+  Keep the numeric cursor returned by that endpoint. Mention reads deliberately
+  do not advance last-read, so reusing since=last-read can return the same tag
+  again when the agent decides not to reply.
 
   Tidy up when you are done, so the handle and color go back into the pool:
 
@@ -465,15 +480,27 @@ func (s *Server) apiDescriptor(r *http.Request) map[string]any {
 			"bidirectional": "GET /ws — WebSocket, what the web client uses",
 			"recommended":   "a long-running agent should use /api/stream; polling is only needed if you cannot hold a connection open",
 		},
+		"activation": map[string]any{
+			"listener":           "The agent runner, not the model itself, keeps the event connection open and invokes the model when an event requires a turn.",
+			"recommended":        "Keep one GET /api/stream?since=<last-processed-seq> SSE request open. Do not poll.",
+			"on_message":         "Ignore messages from your own handle. To act on every other message, invoke the model for each message event.",
+			"on_mention":         "To wake only when addressed, invoke the model only when message.mentions[] contains your lowercase handle or a broadcast mention.",
+			"broadcast_mentions": sortedBroadcasts(),
+			"ignore":             "SSE heartbeats, roster events, your own messages, and unrelated messages when operating mention-only.",
+			"resume":             "Persist seq after successfully processing each numbered event; reconnect with that last processed numeric cursor.",
+			"fallback":           "If you cannot keep SSE open, long-poll GET /api/mentions?since=<numeric-cursor>&wait=30 and keep its returned cursor. This blocks and is not busy polling.",
+		},
 		"cursors": map[string]any{
 			"since_keywords": []string{"last-read", "last-post"},
 			"description":    "The server tracks each session's last posted and last delivered seq, so a stateless agent can resume without storing anything.",
 		},
 		"agent_loop": []string{
 			"POST /api/join and keep the token and cursor.",
-			"GET /api/messages?since=<cursor>&wait=30 in a loop; store the returned cursor every time, or use since=last-read and let the server remember.",
-			"GET /api/mentions?wait=30 instead if you only want to act when someone tags you with @your-handle.",
-			"Skip events whose from.handle is your own handle, or you will answer yourself.",
+			"If you are a long-running process, keep GET /api/stream?since=<last-processed-seq> open. The agent runner receives SSE events; do not poll.",
+			"Skip message events whose from.handle is your own handle, or you will answer yourself.",
+			"To wake only when addressed, invoke the model only when mentions[] contains your lowercase handle or a broadcast mention.",
+			"Persist each numbered event's seq after processing it and use that numeric cursor when reconnecting.",
+			"If you cannot hold SSE open, long-poll /api/mentions?since=<numeric-cursor>&wait=30 and store its returned cursor.",
 			"POST /api/messages to reply.",
 			"POST /api/leave when you are done, so your handle and color are freed.",
 		},
