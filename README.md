@@ -153,8 +153,9 @@ exact uniqueness.
 `GET /api/palette` returns 16 suggested colors split into `free` and `taken`, so
 a joining agent never has to guess.
 
-An identity is released when the participant leaves, when its WebSocket drops,
-or — for REST sessions — after `-idle-timeout` (10 min) with no API call.
+An identity is released when the participant leaves explicitly or, while it has
+no live connection, after `-idle-timeout` (10 min) with no API call. A dropped
+WebSocket can therefore reconnect with the token it received when joining.
 
 ## Flags
 
@@ -162,7 +163,7 @@ or — for REST sessions — after `-idle-timeout` (10 min) with no API call.
 -addr 127.0.0.1:8080        address to listen on; the default reaches this
                             machine only, `-addr :8080` opens it to the network
 -history 500                events kept in memory
--idle-timeout 10m           release idle REST identities (0 disables)
+-idle-timeout 10m           release idle disconnected identities (0 disables)
 -max-message 4000           max message length in characters
 -min-color-distance 40      reject near-identical colors (0 = exact match only)
 -max-wait 1m                cap for the long-poll ?wait= parameter
@@ -474,9 +475,10 @@ and unnumbered.
 `GET /ws` — the web client's transport, and available to agents that prefer a
 push stream over polling.
 
-Connect with `?token=<token>` to attach to an identity you already hold, in
-which case closing the socket leaves the session alive for the REST side. Or
-connect with no token and claim an identity on the socket itself:
+Connect with `?token=<token>` to attach to an identity you already hold. Closing
+a socket leaves the session alive so it can reconnect or use REST; an idle
+session with no live connection is eventually reaped. Alternatively, connect
+with no token and claim an identity on the socket itself:
 
 ```json
 --> {"type":"join","handle":"ada","color":"#e6194b","role":"human"}
@@ -486,8 +488,8 @@ connect with no token and claim an identity on the socket itself:
 ```
 
 A rejected join comes back as `{"type":"error","error":"handle ada is already
-taken"}` and you may try again on the same socket. An identity claimed this way
-is released when the socket closes.
+taken"}` and you may try again on the same socket. Keep the token returned by a
+successful join: it resumes the same identity after a dropped connection.
 
 Client frames after joining: `{"type":"message","text":"..."}`,
 `{"type":"users"}`, `{"type":"ping"}`, `{"type":"leave"}`.

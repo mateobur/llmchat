@@ -138,7 +138,7 @@ func (e *TakenError) Error() string {
 // Config holds the tunables the Hub cares about.
 type Config struct {
 	History          int           // messages kept in memory
-	IdleTimeout      time.Duration // REST sessions with no activity are dropped
+	IdleTimeout      time.Duration // disconnected sessions with no activity are dropped
 	MaxMessageLen    int
 	MinColorDistance float64 // 0 disables the "too similar" check
 	SendBuffer       int     // per-subscriber queue depth
@@ -253,10 +253,24 @@ func (h *Hub) Join(rawHandle, rawColor, rawRole string) (*Session, error) {
 // It is safe to call twice; the second call is a no-op.
 func (h *Hub) Leave(token, reason string) {
 	h.mu.Lock()
+	subs, removed := h.leaveLocked(token, reason)
+	h.mu.Unlock()
+	if !removed {
+		return
+	}
+
+	// Closing outside the lock: readers drain their queue before noticing.
+	for _, sub := range subs {
+		sub.close()
+	}
+}
+
+// leaveLocked removes a session and publishes its leave event. Caller must
+// hold h.mu. Subscribers are returned so they can be closed after unlocking.
+func (h *Hub) leaveLocked(token, reason string) ([]*subscriber, bool) {
 	s, ok := h.sessions[token]
 	if !ok {
-		h.mu.Unlock()
-		return
+		return nil, false
 	}
 	delete(h.sessions, token)
 	if cur, ok := h.byHandle[HandleKey(s.Handle)]; ok && cur == s {
@@ -276,12 +290,7 @@ func (h *Hub) Leave(token, reason string) {
 		reason = "left"
 	}
 	h.publishLocked(&Event{Type: EventLeave, From: &user, Text: fmt.Sprintf("%s %s", s.Handle, reason)})
-	h.mu.Unlock()
-
-	// Closing outside the lock: readers drain their queue before noticing.
-	for _, sub := range subs {
-		sub.close()
-	}
+	return subs, true
 }
 
 // Post appends a message from the given session.
@@ -551,23 +560,49 @@ func (h *Hub) AvailableColors() (free, taken []string) {
 	return free, taken
 }
 
-// ReapIdle drops sessions that have no live subscriber and have not called the
-// REST API within IdleTimeout, so their handle and color come back into play.
+// ReapIdle drops sessions that have no live subscriber and have not used the
+// API within IdleTimeout, so their handle and color come back into play.
 func (h *Hub) ReapIdle(now time.Time) int {
 	if h.cfg.IdleTimeout <= 0 {
 		return 0
 	}
+	type candidate struct {
+		token    string
+		lastSeen time.Time
+	}
 	h.mu.Lock()
-	var stale []string
+	var stale []candidate
 	for token, s := range h.sessions {
 		if len(s.subs) == 0 && now.Sub(s.lastSeen) > h.cfg.IdleTimeout {
-			stale = append(stale, token)
+			stale = append(stale, candidate{token: token, lastSeen: s.lastSeen})
 		}
 	}
 	h.mu.Unlock()
 
-	for _, token := range stale {
-		h.Leave(token, "timed out")
+	reaped := 0
+	for _, c := range stale {
+		if h.reapCandidate(c.token, c.lastSeen, now) {
+			reaped++
+		}
 	}
-	return len(stale)
+	return reaped
+}
+
+// reapCandidate removes a session only if it is still in the idle state seen
+// by ReapIdle. A request or subscription arriving after the initial scan must
+// win over the reaper instead of being followed by a stale Leave.
+func (h *Hub) reapCandidate(token string, observed time.Time, now time.Time) bool {
+	h.mu.Lock()
+	s, ok := h.sessions[token]
+	if !ok || len(s.subs) != 0 || !s.lastSeen.Equal(observed) ||
+		now.Sub(s.lastSeen) <= h.cfg.IdleTimeout {
+		h.mu.Unlock()
+		return false
+	}
+	subs, removed := h.leaveLocked(token, "timed out")
+	h.mu.Unlock()
+	for _, sub := range subs {
+		sub.close()
+	}
+	return removed
 }

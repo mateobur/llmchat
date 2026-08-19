@@ -276,7 +276,7 @@ func TestReapIdleOnlyDropsUnsubscribedSessions(t *testing.T) {
 		t.Fatalf("reaped %d sessions; want 1 (the REST one)", n)
 	}
 	if _, err := h.Touch(rest.token); !errors.Is(err, ErrNotJoined) {
-		t.Error("idle REST session survived the reaper")
+		t.Error("idle session survived the reaper")
 	}
 	if _, err := h.Touch(live.token); err != nil {
 		t.Error("subscribed session was reaped")
@@ -296,6 +296,25 @@ func TestTouchKeepsSessionAlive(t *testing.T) {
 	}
 	if n := h.ReapIdle(time.Now().Add(59 * time.Second)); n != 0 {
 		t.Errorf("reaped %d recently active sessions; want 0", n)
+	}
+}
+
+func TestReapCandidateDoesNotDropReactivatedSession(t *testing.T) {
+	h := NewHub(testConfig())
+	s, _ := h.Join("ada", "#e6194b", "")
+
+	// ReapIdle scans first and removes candidates second. Simulate activity in
+	// that interval and verify the stale observation cannot remove the session.
+	h.mu.Lock()
+	observed := s.lastSeen
+	s.lastSeen = observed.Add(time.Nanosecond)
+	h.mu.Unlock()
+
+	if h.reapCandidate(s.token, observed, observed.Add(2*time.Minute)) {
+		t.Fatal("reaper removed a session that became active after its scan")
+	}
+	if _, err := h.Touch(s.token); err != nil {
+		t.Fatalf("reactivated session did not survive: %v", err)
 	}
 }
 

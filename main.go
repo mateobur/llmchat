@@ -18,7 +18,7 @@ func main() {
 	var (
 		addr           = flag.String("addr", "127.0.0.1:8080", "address to listen on; the default reaches this machine only, use :8080 to accept connections from the network")
 		history        = flag.Int("history", 500, "number of recent events kept in memory")
-		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "release the handle and color of REST sessions idle for this long (0 disables)")
+		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "release the handle and color of disconnected sessions idle for this long (0 disables)")
 		maxMessage     = flag.Int("max-message", 4000, "maximum message length in characters")
 		minColorDist   = flag.Float64("min-color-distance", 40, "reject colors closer than this to one in use (0 allows anything but exact duplicates)")
 		maxWait        = flag.Duration("max-wait", 60*time.Second, "cap for the long-poll ?wait= parameter")

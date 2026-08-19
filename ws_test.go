@@ -134,15 +134,36 @@ func TestWSJoinRejectionIsRetryableOnTheSameSocket(t *testing.T) {
 	}
 }
 
-func TestWSDisconnectReleasesIdentity(t *testing.T) {
+func TestWSDisconnectCanResumeIdentity(t *testing.T) {
 	ts, hub := newTestServer(t, nil)
-	conn, _ := wsJoin(t, ts, "ada", "#e6194b", "human")
+	conn, token := wsJoin(t, ts, "ada", "#e6194b", "human")
 	conn.Close()
 
-	if !eventually(2*time.Second, func() bool { return len(hub.Users()) == 0 }) {
-		t.Fatalf("roster still holds %+v after the socket closed", hub.Users())
+	// Wait until the server has observed the disconnect. The identity stays
+	// alive without a subscriber so the browser can resume after a network blip.
+	if !eventually(2*time.Second, func() bool {
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		s, ok := hub.sessions[token]
+		return ok && len(s.subs) == 0
+	}) {
+		t.Fatalf("session was removed or stayed subscribed after disconnect: %+v", hub.Users())
 	}
-	restJoin(t, ts, "ada", "#e6194b", "llm") // free again
+
+	resumed, _, err := wsDial(t, ts, url.Values{"token": {token}}, nil)
+	if err != nil {
+		t.Fatalf("resume after disconnect: %v", err)
+	}
+	if ev := waitFor(t, resumed, "welcome after resume", func(e *Event) bool {
+		return e.Type == EventWelcome
+	}); ev.Self == nil || ev.Self.Handle != "ada" {
+		t.Fatalf("resume welcome = %+v; want ada", ev)
+	}
+
+	send(t, resumed, clientFrame{Type: "message", Text: "back online"})
+	waitFor(t, resumed, "message after resume", func(e *Event) bool {
+		return e.Type == EventMessage && e.Text == "back online"
+	})
 }
 
 func TestWSResumesRESTSessionWithoutEndingIt(t *testing.T) {

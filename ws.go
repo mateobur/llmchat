@@ -78,7 +78,6 @@ type wsConn struct {
 
 	token string
 	self  User
-	owns  bool // this socket created the session, so it also ends it
 }
 
 func (c *wsConn) serve(token string) {
@@ -130,9 +129,6 @@ func (c *wsConn) serve(token string) {
 	c.readPump()
 
 	c.srv.hub.Unsubscribe(c.token, sub) // closes sub.ch, unblocking writePump
-	if c.owns {
-		c.srv.hub.Leave(c.token, "disconnected")
-	}
 	<-writerDone
 }
 
@@ -157,7 +153,7 @@ func (c *wsConn) joinPhase() bool {
 			c.writeDirect(&Event{Type: EventError, TS: time.Now().UTC(), Error: err.Error()})
 			continue
 		}
-		c.token, c.self, c.owns = sess.token, sess.User, true
+		c.token, c.self = sess.token, sess.User
 		c.srv.logger.Printf("join(ws): %s (%s) as %s", sess.Handle, sess.Color, sess.Role)
 		// Hand the token back so the same identity can also be driven over REST.
 		c.writeDirect(&Event{Type: EventJoin, TS: time.Now().UTC(), Self: &sess.User, Token: sess.token})
